@@ -52,12 +52,17 @@ from onyx.chat.models import StreamingError
 from onyx.chat.models import ToolCallResponse
 from onyx.chat.prompt_utils import calculate_reserved_tokens
 from onyx.chat.save_chat import save_chat_turn
+from onyx.chat.search_policy import (
+    determine_search_params as _determine_search_params,
+)
+from onyx.chat.search_policy import (
+    should_enable_slack_search as _should_enable_slack_search_impl,
+)
 from onyx.chat.stop_signal_checker import is_connected as check_stop_signal
 from onyx.chat.stop_signal_checker import reset_cancel_status
 from onyx.configs.app_configs import DISABLE_VECTOR_DB
 from onyx.configs.app_configs import INTEGRATION_TESTS_MODE
 from onyx.configs.constants import DEFAULT_PERSONA_ID
-from onyx.configs.constants import DocumentSource
 from onyx.configs.constants import MessageType
 from onyx.configs.constants import MilestoneRecordType
 from onyx.context.search.models import BaseFilters
@@ -171,16 +176,9 @@ def _should_enable_slack_search(
     persona: Persona,
     filters: BaseFilters | None,
 ) -> bool:
-    """Determine if Slack search should be enabled.
+    """Compatibility wrapper around `onyx.chat.search_policy.should_enable_slack_search`."""
 
-    Returns True if:
-    - Source type filter exists and includes Slack, OR
-    - Default persona with no source type filter
-    """
-    source_types = filters.source_type if filters else None
-    return (source_types is not None and DocumentSource.SLACK in source_types) or (
-        persona.id == DEFAULT_PERSONA_ID and source_types is None
-    )
+    return _should_enable_slack_search_impl(persona.id, filters)
 
 
 def _convert_loaded_files_to_chat_files(
@@ -432,30 +430,10 @@ def determine_search_params(
       - Files fit       → DISABLED (content already in prompt)
       - No files at all → DISABLED (nothing to search)
     """
-    is_custom_persona = persona_id != DEFAULT_PERSONA_ID
-
-    project_id_filter: int | None = None
-    persona_id_filter: int | None = None
-    if extracted_context_files.use_as_search_filter:
-        if is_custom_persona:
-            persona_id_filter = persona_id
-        else:
-            project_id_filter = project_id
-
-    search_usage = SearchToolUsage.AUTO
-    if not is_custom_persona and project_id:
-        has_context_files = bool(extracted_context_files.uncapped_token_count)
-        files_loaded_in_context = bool(extracted_context_files.file_texts)
-
-        if extracted_context_files.use_as_search_filter:
-            search_usage = SearchToolUsage.ENABLED
-        elif files_loaded_in_context or not has_context_files:
-            search_usage = SearchToolUsage.DISABLED
-
-    return SearchParams(
-        project_id_filter=project_id_filter,
-        persona_id_filter=persona_id_filter,
-        search_usage=search_usage,
+    return _determine_search_params(
+        persona_id=persona_id,
+        project_id=project_id,
+        extracted_context_files=extracted_context_files,
     )
 
 
