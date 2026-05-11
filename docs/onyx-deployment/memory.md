@@ -300,3 +300,6 @@
 - [2026-05-11 00:00 +09:00] 완료: MCP 출력 정책을 `search_indexed_documents` / `search_web` / `open_urls`에 적용. `search_web`는 `masked_snippet`, `open_urls`는 `summary_only`로 후처리하고 `policy` 메타데이터를 반환하도록 정리. 운영 문서 `2026-05-11-mcp-output-policy-runbook.md` 신규 작성.
 - [2026-05-11 00:00 +09:00] 진행: 111 MCP 서버 기동 이슈를 좁히는 중. 111 live container에서 `mcp_server/resources/document_sets.py`가 `get_accessible_document_sets()`를 요구하지만, local `utils.py`에는 해당 helper가 없어 import 에러 발생. helper를 추가해 111 재기동 준비 중.
 - [2026-05-11 00:00 +09:00] 완료: 111 MCP 서버 재기동 성공. `get_accessible_document_sets()` helper 추가 후 `onyx-mcp_server-1`이 `Up` 상태로 전환되었고 `curl http://127.0.0.1:8090/health`가 `healthy`를 반환함. 246/111 모두 MCP output policy + search_web policy 적용 상태.
+- [2026-05-11 00:00 +09:00] 완료: `internal/main`에 MCP output policy + 111 helper 변경사항 커밋 및 푸시 완료. commit `f1efc8d` (`Add MCP output policy and 111 document set helper`)를 `origin/internal/main`에 반영.
+- [2026-05-11 00:00 +09:00] 완료: `search_web` 후처리를 강화. snippet/body 계열 필드를 요약한 뒤 마스킹하도록 바꾸고, 운영 문서 `2026-05-11-mcp-output-policy-runbook.md`를 해당 동작에 맞게 갱신함.
+- [2026-05-11 00:00 +09:00] 완료: MCP 출력에 인명 비식별화 추가. `MCP_SERVER_REDACT_PERSON_NAMES=true` 기본값으로 MCP 출력 후처리에서만 사람 이름을 마스킹하도록 확장하고, `search_indexed_documents`/`search_web` 결과에 대한 unit test를 추가함.

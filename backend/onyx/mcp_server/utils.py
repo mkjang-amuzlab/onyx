@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -35,6 +36,10 @@ logger = setup_logger()
 # Shared HTTP client reused across requests
 _http_client: httpx.AsyncClient | None = None
 
+MCP_SERVER_REDACT_PERSON_NAMES = (
+    os.environ.get("MCP_SERVER_REDACT_PERSON_NAMES", "true").lower() == "true"
+)
+
 
 @dataclass(frozen=True, slots=True)
 class AccessibleDocumentSet:
@@ -57,12 +62,120 @@ _REDACTION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(?:\d[ -]?){13,19}\b"), "[REDACTED_CARD]"),
 ]
 
+_PERSON_NAME_CONTEXT_KEYWORDS = (
+    "인원",
+    "구성",
+    "멤버",
+    "참여",
+    "담당",
+    "책임",
+    "팀",
+    "조직",
+    "배정",
+    "연락",
+    "작성자",
+    "검토",
+    "개발",
+    "qa",
+    "pm",
+    "owner",
+)
+
+_KOREAN_NAME_STOPWORDS = {
+    "개발",
+    "구성",
+    "인원",
+    "멤버",
+    "프로젝트",
+    "플랫폼",
+    "시스템",
+    "서비스",
+    "문서",
+    "검토",
+    "담당",
+    "책임",
+    "팀",
+    "조직",
+    "배정",
+    "연락",
+    "작성자",
+    "참여",
+    "안내",
+    "요약",
+    "설명",
+    "분석",
+    "검색",
+    "답변",
+    "출처",
+    "근거",
+    "매직",
+    "플랫폼",
+    "개발자",
+    "담당자",
+    "책임자",
+    "매니저",
+    "엔지니어",
+    "연구원",
+    "팀장",
+}
+
+_ENGLISH_PERSON_NAME_PATTERN = re.compile(
+    r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2}\b"
+)
+
+_KOREAN_PERSON_NAME_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"(?<![가-힣])([가-힣]{2,3})(?=\s*님\b)"), "solo"),
+    (
+        re.compile(
+            r"((?:PM|QA|개발자|담당자|책임자|매니저|엔지니어|연구원|팀장)\s+)([가-힣]{2,3})(?=(?:[\s,;/•\-\)\].]|$))"
+        ),
+        "role_prefix",
+    ),
+    (re.compile(r"(?<![가-힣])([가-힣]{2,3})(?=(?:[\s,;/•\-\)\].]|$))"), "solo"),
+]
+
 
 def _apply_redaction_patterns(text: str) -> str:
     """Apply shared sensitive-pattern redactions."""
     redacted = text
     for pattern, replacement in _REDACTION_PATTERNS:
         redacted = pattern.sub(replacement, redacted)
+    return redacted
+
+
+def _should_redact_person_names(text: str) -> bool:
+    normalized = text.casefold()
+    return any(keyword in normalized for keyword in _PERSON_NAME_CONTEXT_KEYWORDS)
+
+
+def _redact_korean_person_name(match: re.Match[str]) -> str:
+    candidate = match.group(1)
+    if candidate in _KOREAN_NAME_STOPWORDS:
+        return candidate
+    return "[REDACTED_NAME]"
+
+
+def _redact_korean_person_name_after_role(match: re.Match[str]) -> str:
+    prefix = match.group(1)
+    candidate = match.group(2)
+    if candidate in _KOREAN_NAME_STOPWORDS:
+        return match.group(0)
+    return f"{prefix}[REDACTED_NAME]"
+
+
+def redact_person_names(text: str) -> str:
+    """Best-effort redaction of person names in MCP output text."""
+    if not MCP_SERVER_REDACT_PERSON_NAMES or not text:
+        return text
+    if not _should_redact_person_names(text):
+        return text
+
+    redacted = _ENGLISH_PERSON_NAME_PATTERN.sub("[REDACTED_NAME]", text)
+    for pattern, pattern_kind in _KOREAN_PERSON_NAME_PATTERNS:
+        if pattern_kind == "role_prefix":
+            redacted = pattern.sub(_redact_korean_person_name_after_role, redacted)
+        else:
+            redacted = pattern.sub(_redact_korean_person_name, redacted)
     return redacted
 
 
@@ -105,7 +218,9 @@ def redact_sensitive_output_text(text: str) -> str:
     if not MCP_SERVER_REDACT_SENSITIVE_OUTPUT or not text:
         return text
 
-    return _apply_redaction_patterns(text)
+    redacted = _apply_redaction_patterns(text)
+    redacted = redact_person_names(redacted)
+    return redacted
 
 
 def build_safe_summary(text: str, max_chars: int | None = None) -> str:
