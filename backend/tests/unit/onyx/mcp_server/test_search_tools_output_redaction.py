@@ -109,5 +109,6 @@ def test_search_web_applies_output_policy(monkeypatch) -> None:
     result = asyncio.run(mcp_search.search_web(query="test", limit=5))
 
     assert result["policy"]["mode"] == "masked_snippet"
+    assert result["policy"]["summary_applied"] is True
     assert result["results"][0]["title"] == "Example [REDACTED_EMAIL]"
     assert result["results"][0]["snippet"] == "Call [REDACTED_PHONE] for details."
