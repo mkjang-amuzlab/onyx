@@ -7,8 +7,10 @@ import httpx
 
 from onyx.configs.constants import DocumentSource
 from onyx.mcp_server.api import mcp_server
+from onyx.mcp_server.output_policy import apply_mcp_output_policy
 from onyx.mcp_server.utils import get_http_client
 from onyx.mcp_server.utils import get_indexed_sources
+from onyx.mcp_server.utils import redact_sensitive_text
 from onyx.mcp_server.utils import require_access_token
 from onyx.utils.logger import setup_logger
 from onyx.utils.variable_functionality import build_api_server_url_for_http_requests
@@ -65,8 +67,12 @@ async def search_indexed_documents(
     }
     ```
     """
+    redacted_query = redact_sensitive_text(query)
     logger.info(
-        f"Onyx MCP Server: document search: query='{query}', sources={source_types}, limit={limit}"
+        "Onyx MCP Server: document search: redacted_query='%s', sources=%s, limit=%s",
+        redacted_query,
+        source_types,
+        limit,
     )
 
     # Parse time_cutoff string to datetime if provided
@@ -96,24 +102,30 @@ async def search_indexed_documents(
             e,
             exc_info=True,
         )
-        return {
-            "documents": [],
-            "total_results": 0,
-            "query": query,
-            "error": (f"Failed to check indexed sources: {str(e)}. "),
-        }
+        return apply_mcp_output_policy(
+            "search_indexed_documents",
+            {
+                "documents": [],
+                "total_results": 0,
+                "query": query,
+                "error": f"Failed to check indexed sources: {str(e)}.",
+            },
+        )
 
     if not sources:
         logger.info("Onyx MCP Server: No indexed sources available for tenant")
-        return {
-            "documents": [],
-            "total_results": 0,
-            "query": query,
-            "message": (
-                "No document sources are indexed yet. Add connectors or upload data "
-                "through Onyx before calling onyx_search_documents."
-            ),
-        }
+        return apply_mcp_output_policy(
+            "search_indexed_documents",
+            {
+                "documents": [],
+                "total_results": 0,
+                "query": query,
+                "message": (
+                    "No document sources are indexed yet. Add connectors or upload data "
+                    "through Onyx before calling onyx_search_documents."
+                ),
+            },
+        )
 
     # Convert source_types strings to DocumentSource enums if provided
     # Invalid values will be handled by the API server
@@ -144,7 +156,7 @@ async def search_indexed_documents(
     if is_ee:
         # EE: use the dedicated search endpoint (no LLM invocation)
         search_request = {
-            "search_query": query,
+            "search_query": redacted_query,
             "filters": filters,
             "num_docs_fed_to_llm_selection": limit,
             "run_query_expansion": False,
@@ -158,7 +170,7 @@ async def search_indexed_documents(
     else:
         # CE: fall back to the chat endpoint (invokes LLM, consumes tokens)
         search_request = {
-            "message": query,
+            "message": redacted_query,
             "stream": False,
             "chat_session_info": {},
         }
@@ -177,22 +189,28 @@ async def search_indexed_documents(
         )
         if not response.is_success:
             error_detail = _extract_error_detail(response)
-            return {
-                "documents": [],
-                "total_results": 0,
-                "query": query,
-                "error": error_detail,
-            }
+            return apply_mcp_output_policy(
+                "search_indexed_documents",
+                {
+                    "documents": [],
+                    "total_results": 0,
+                    "query": redacted_query,
+                    "error": error_detail,
+                },
+            )
         result = response.json()
 
         # Check for error in response
         if result.get(error_key):
-            return {
-                "documents": [],
-                "total_results": 0,
-                "query": query,
-                "error": result.get(error_key),
-            }
+            return apply_mcp_output_policy(
+                "search_indexed_documents",
+                {
+                    "documents": [],
+                    "total_results": 0,
+                    "query": redacted_query,
+                    "error": result.get(error_key),
+                },
+            )
 
         documents = [
             {
@@ -213,18 +231,24 @@ async def search_indexed_documents(
         logger.info(
             f"Onyx MCP Server: Internal search returned {len(documents)} results"
         )
-        return {
-            "documents": documents,
-            "total_results": len(documents),
-            "query": query,
-        }
+        return apply_mcp_output_policy(
+            "search_indexed_documents",
+            {
+                "documents": documents,
+                "total_results": len(documents),
+                "query": redacted_query,
+            },
+        )
     except Exception as e:
         logger.error(f"Onyx MCP Server: Document search error: {e}", exc_info=True)
-        return {
-            "error": f"Document search failed: {str(e)}",
-            "documents": [],
-            "query": query,
-        }
+        return apply_mcp_output_policy(
+            "search_indexed_documents",
+            {
+                "error": f"Document search failed: {str(e)}",
+                "documents": [],
+                "query": redacted_query,
+            },
+        )
 
 
 @mcp_server.tool()
@@ -247,12 +271,17 @@ async def search_web(
     }
     ```
     """
-    logger.info(f"Onyx MCP Server: Web search: query='{query}', limit={limit}")
+    redacted_query = redact_sensitive_text(query)
+    logger.info(
+        "Onyx MCP Server: Web search: redacted_query='%s', limit=%s",
+        redacted_query,
+        limit,
+    )
 
     access_token = require_access_token()
 
     try:
-        request_payload = {"queries": [query], "max_results": limit}
+        request_payload = {"queries": [redacted_query], "max_results": limit}
         response = await get_http_client().post(
             f"{build_api_server_url_for_http_requests(respect_env_override_if_set=True)}/web-search/search-lite",
             json=request_payload,
@@ -260,24 +289,33 @@ async def search_web(
         )
         if not response.is_success:
             error_detail = _extract_error_detail(response)
-            return {
-                "error": error_detail,
-                "results": [],
-                "query": query,
-            }
+            return apply_mcp_output_policy(
+                "search_web",
+                {
+                    "error": error_detail,
+                    "results": [],
+                    "query": redacted_query,
+                },
+            )
         response_payload = response.json()
         results = response_payload.get("results", [])
-        return {
-            "results": results,
-            "query": query,
-        }
+        return apply_mcp_output_policy(
+            "search_web",
+            {
+                "results": results,
+                "query": redacted_query,
+            },
+        )
     except Exception as e:
         logger.error(f"Onyx MCP Server: Web search error: {e}", exc_info=True)
-        return {
-            "error": f"Web search failed: {str(e)}",
-            "results": [],
-            "query": query,
-        }
+        return apply_mcp_output_policy(
+            "search_web",
+            {
+                "error": f"Web search failed: {str(e)}",
+                "results": [],
+                "query": redacted_query,
+            },
+        )
 
 
 @mcp_server.tool()
@@ -312,18 +350,27 @@ async def open_urls(
         )
         if not response.is_success:
             error_detail = _extract_error_detail(response)
-            return {
-                "error": error_detail,
-                "results": [],
-            }
+            return apply_mcp_output_policy(
+                "open_urls",
+                {
+                    "error": error_detail,
+                    "results": [],
+                },
+            )
         response_payload = response.json()
         results = response_payload.get("results", [])
-        return {
-            "results": results,
-        }
+        return apply_mcp_output_policy(
+            "open_urls",
+            {
+                "results": results,
+            },
+        )
     except Exception as e:
         logger.error(f"Onyx MCP Server: URL fetch error: {e}", exc_info=True)
-        return {
-            "error": f"URL fetch failed: {str(e)}",
-            "results": [],
-        }
+        return apply_mcp_output_policy(
+            "open_urls",
+            {
+                "error": f"URL fetch failed: {str(e)}",
+                "results": [],
+            },
+        )

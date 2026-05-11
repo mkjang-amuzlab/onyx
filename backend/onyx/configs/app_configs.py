@@ -1089,6 +1089,45 @@ MCP_SERVER_CORS_ORIGINS = [
     if origin.strip()
 ]
 
+# Redact likely sensitive values from MCP client prompt/query payloads
+# before forwarding to internal search APIs.
+MCP_SERVER_REDACT_SENSITIVE_INPUT = (
+    os.environ.get("MCP_SERVER_REDACT_SENSITIVE_INPUT", "true").lower() == "true"
+)
+
+# Redact likely sensitive values from MCP output payloads before returning them
+# to the client. Defaults to true because MCP output can leak raw source text.
+MCP_SERVER_REDACT_SENSITIVE_OUTPUT = (
+    os.environ.get("MCP_SERVER_REDACT_SENSITIVE_OUTPUT", "true").lower() == "true"
+)
+
+# MCP output policy mode:
+# - "hybrid": tool-aware output shaping with redaction + summary
+# - "raw": keep original payload when explicitly allowed
+MCP_SERVER_OUTPUT_POLICY_MODE = (
+    os.environ.get("MCP_SERVER_OUTPUT_POLICY_MODE", "hybrid").lower()
+)
+
+# Default output shaping for internal search results.
+MCP_SERVER_SEARCH_RESULT_MODE = (
+    os.environ.get("MCP_SERVER_SEARCH_RESULT_MODE", "masked_snippet").lower()
+)
+
+# Default output shaping for URL fetches.
+MCP_SERVER_OPEN_URL_MODE = (
+    os.environ.get("MCP_SERVER_OPEN_URL_MODE", "summary_only").lower()
+)
+
+# Maximum characters for generated summaries returned by MCP.
+MCP_SERVER_SUMMARY_MAX_CHARS = int(
+    os.environ.get("MCP_SERVER_SUMMARY_MAX_CHARS") or 800
+)
+
+# Safety valve for explicit raw-output mode during debugging.
+MCP_SERVER_ALLOW_RAW_OUTPUT = (
+    os.environ.get("MCP_SERVER_ALLOW_RAW_OUTPUT", "false").lower() == "true"
+)
+
 
 POD_NAME = os.environ.get("POD_NAME")
 POD_NAMESPACE = os.environ.get("POD_NAMESPACE")
