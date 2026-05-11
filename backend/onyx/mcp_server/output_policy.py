@@ -53,6 +53,20 @@ def _apply_result_item_masking(item: dict[str, Any]) -> dict[str, Any]:
     return masked_item
 
 
+_SEARCH_WEB_SUMMARY_FIELDS = {"snippet", "content", "text", "description", "body"}
+
+
+def _apply_result_item_summary(item: dict[str, Any]) -> dict[str, Any]:
+    summarized_item = deepcopy(item)
+    for key, value in list(summarized_item.items()):
+        if key in {"url", "link"}:
+            continue
+        if isinstance(value, str):
+            summarized = _summary_text(value)
+            summarized_item[key] = _mask_text(summarized)
+    return summarized_item
+
+
 def _apply_search_documents_policy(payload: dict[str, Any]) -> dict[str, Any]:
     mode = MCP_SERVER_SEARCH_RESULT_MODE
     if MCP_SERVER_OUTPUT_POLICY_MODE == "raw" and MCP_SERVER_ALLOW_RAW_OUTPUT:
@@ -136,13 +150,23 @@ def _apply_search_web_policy(payload: dict[str, Any]) -> dict[str, Any]:
     results = list(payload.get("results") or [])
     processed_results: list[dict[str, Any]] = []
     redaction_applied = False
+    summary_applied = False
 
     for result in results:
         if not isinstance(result, dict):
             continue
-        processed_result = _apply_result_item_masking(result)
-        if processed_result != result:
-            redaction_applied = True
+        if any(
+            key in _SEARCH_WEB_SUMMARY_FIELDS and isinstance(value, str)
+            for key, value in result.items()
+        ):
+            processed_result = _apply_result_item_summary(result)
+            if processed_result != result:
+                summary_applied = True
+                redaction_applied = True
+        else:
+            processed_result = _apply_result_item_masking(result)
+            if processed_result != result:
+                redaction_applied = True
         processed_results.append(processed_result)
 
     processed = deepcopy(payload)
@@ -150,7 +174,7 @@ def _apply_search_web_policy(payload: dict[str, Any]) -> dict[str, Any]:
     decision = MCPOutputPolicyDecision(
         mode=mode,
         redaction_applied=redaction_applied,
-        summary_applied=False,
+        summary_applied=summary_applied,
     )
     return _attach_policy(processed, decision)
 

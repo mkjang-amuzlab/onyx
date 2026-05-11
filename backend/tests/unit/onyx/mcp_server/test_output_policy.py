@@ -107,7 +107,7 @@ def test_search_web_policy_masks_sensitive_result_fields(monkeypatch) -> None:
 
     assert result["policy"]["mode"] == "masked_snippet"
     assert result["policy"]["redaction_applied"] is True
-    assert result["policy"]["summary_applied"] is False
+    assert result["policy"]["summary_applied"] is True
     assert result["results"][0]["title"] == "Example [REDACTED_EMAIL]"
     assert result["results"][0]["snippet"] == "Contact [REDACTED_PHONE] for details."
 
