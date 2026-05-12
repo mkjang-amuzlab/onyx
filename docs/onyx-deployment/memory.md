@@ -305,3 +305,5 @@
 - [2026-05-11 00:00 +09:00] 완료: MCP 출력에 인명 비식별화 추가. `MCP_SERVER_REDACT_PERSON_NAMES=true` 기본값으로 MCP 출력 후처리에서만 사람 이름을 마스킹하도록 확장하고, `search_indexed_documents`/`search_web` 결과에 대한 unit test를 추가함.
 - [2026-05-12 00:00 +09:00] 완료: Onyx custom git 운영 방식 정리. 수정된 파일 자체를 `onyx_custom` 저장소에 보관하고, 변경 이유/절차는 별도 문서로 남기는 구조로 합의함. upstream 변경은 overwrite가 아니라 merge/rebase로 흡수하는 방향으로 기록함.
 - [2026-05-12 00:00 +09:00] 진행: `internal/main` 기준 변경 파일만 다른 체크아웃으로 내보내는 `tools/export_internal_main_overlay.ps1` 초안 추가. dirty worktree와 무관하게 커밋된 overlay만 내보내는 흐름으로 시작함.
+- [2026-05-12 00:00 +09:00] 완료: `onyx_custom` 저장소에 문서 스냅샷과 README 세트를 추가. 루트 `README.md`, `docs/README.md`, `docs/onyx-deployment/README.md`, `docs/superpowers/README.md`를 포함해 문서 입구를 정리했고, 커밋 `c96b2bd`(문서 스냅샷)와 `ebbc118`(README 추가)을 `origin/internal/main`에 push 완료.
+- [2026-05-12 00:00 +09:00] 완료: `AGENTS.md`에 custom Onyx workflow를 반영. `onyx_custom`을 source of truth로 두고, `internal/main`/`patch/*` 브랜치, upstream merge/rebase, cache 파일 제외 원칙을 명시함.

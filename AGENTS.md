@@ -16,6 +16,20 @@ This file provides guidance to AI agents when working with code in this reposito
 - Put ALL db operations under the `backend/onyx/db` / `backend/ee/onyx/db` directories. Don't run queries
   outside of those directories.
 
+## Custom Onyx Workflow
+
+- Treat `onyx_custom` as the source of truth for our internal changes.
+- Keep custom changes in `internal/main` and topic branches under `patch/*`.
+- When upstream changes arrive, merge or rebase them into `internal/main`; do not overwrite files blindly.
+- Preserve the custom repo layout:
+  - root `README.md` for repo-level usage
+  - `docs/README.md` for the document index
+  - `docs/onyx-deployment/README.md` for deployment / operations docs
+  - `docs/superpowers/README.md` for plans and specs
+- When adding or changing operator runbooks, update `docs/onyx-deployment/memory.md` as a working memory log.
+- Keep generated cache files (`__pycache__`, `.pyc`) out of the custom repo snapshots.
+- Prefer modified file snapshots over diff patches for the custom repo, and keep the rationale in docs.
+
 ## Project Overview
 
 **Onyx** (formerly Danswer) is an open-source Gen-AI and Enterprise Search platform that connects to company documents, apps, and people. It features a modular architecture with both Community Edition (MIT licensed) and Enterprise Edition offerings.
@@ -49,12 +63,12 @@ Onyx uses Celery for asynchronous task processing with multiple specialized work
 
 4. **Light Worker** (`light`)
    - Handles lightweight, fast operations
-   - Tasks: vespa metadata sync, connector deletion, doc permissions upsert, checkpoint cleanup, index attempt cleanup
+   - Tasks: vespa operations, document permissions sync, external group sync
    - Higher concurrency for quick tasks
 
 5. **Heavy Worker** (`heavy`)
    - Handles resource-intensive operations
-   - Tasks: connector pruning, document permissions sync, external group sync, CSV generation
+   - Primary task: document pruning operations
    - Runs with 4 threads concurrency
 
 6. **KG Processing Worker** (`kg_processing`)
