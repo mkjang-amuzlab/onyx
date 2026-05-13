@@ -211,16 +211,23 @@ def test_resolve_user_from_access_token_prefers_user_id(
     assert db_session.scalar.called
 
 
+@patch("onyx.mcp_server.search_backend_ce.get_default_document_index")
+@patch("onyx.mcp_server.search_backend_ce.get_current_search_settings")
 @patch("onyx.mcp_server.search_backend_ce.search_pipeline")
 @patch(
     "onyx.mcp_server.search_backend_ce.get_indexed_sources",
     new_callable=AsyncMock,
 )
 def test_helper_uses_direct_search_pipeline(
-    mock_get_indexed_sources: AsyncMock, mock_search_pipeline: Mock
+    mock_get_indexed_sources: AsyncMock,
+    mock_search_pipeline: Mock,
+    mock_get_current_search_settings: Mock,
+    mock_get_default_document_index: Mock,
 ) -> None:
     mock_get_indexed_sources.return_value = ["file"]
     mock_search_pipeline.return_value = []
+    mock_get_current_search_settings.return_value = Mock()
+    mock_get_default_document_index.return_value = Mock()
 
     async def _run_test() -> dict:
         return await search_indexed_sections_without_llm(
