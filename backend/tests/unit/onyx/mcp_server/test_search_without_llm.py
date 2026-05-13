@@ -119,8 +119,13 @@ def test_helper_returns_empty_payload_when_no_sources(
     assert payload["error"] == "No document sources are indexed yet."
 
 
-def test_output_policy_attaches_raw_policy_for_new_tool() -> None:
-    shaped = apply_mcp_output_policy(
+def test_output_policy_attaches_raw_policy_for_new_tool(monkeypatch) -> None:
+    from onyx.mcp_server import output_policy as policy
+
+    monkeypatch.setattr(policy, "MCP_SERVER_OUTPUT_POLICY_MODE", "raw")
+    monkeypatch.setattr(policy, "MCP_SERVER_ALLOW_RAW_OUTPUT", True)
+
+    shaped = policy.apply_mcp_output_policy(
         "search_indexed_documents_without_llm",
         {
             "query": "q",

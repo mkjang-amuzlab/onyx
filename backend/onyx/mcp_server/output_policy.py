@@ -207,23 +207,11 @@ def _apply_search_without_llm_policy(payload: dict[str, Any]) -> dict[str, Any]:
             ),
         )
 
-    processed = deepcopy(payload)
-    sections = list(processed.get("sections") or [])
-    processed_sections: list[dict[str, Any]] = []
-    redaction_applied = False
-
-    for section in sections:
-        if not isinstance(section, dict):
-            continue
-        processed_section = _redact_structure(
-            section,
-            preserve_keys={"link", "url"},
-        )
-        if processed_section != section:
-            redaction_applied = True
-        processed_sections.append(processed_section)
-
-    processed["sections"] = processed_sections
+    processed = _redact_structure(
+        deepcopy(payload),
+        preserve_keys={"link", "url"},
+    )
+    redaction_applied = processed != payload
     return _attach_policy(
         processed,
         MCPOutputPolicyDecision(
