@@ -6,14 +6,19 @@ import os
 import re
 from dataclasses import dataclass
 from typing import Any
+from uuid import UUID
 
 import httpx
 from fastmcp.server.auth.auth import AccessToken
 from fastmcp.server.dependencies import get_access_token
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from onyx.configs.app_configs import MCP_SERVER_REDACT_SENSITIVE_OUTPUT
 from onyx.configs.app_configs import MCP_SERVER_REDACT_SENSITIVE_INPUT
 from onyx.configs.app_configs import MCP_SERVER_SUMMARY_MAX_CHARS
+from onyx.db.models import User
+from onyx.db.users import get_user_by_email
 from onyx.utils.logger import setup_logger
 from onyx.utils.variable_functionality import build_api_server_url_for_http_requests
 
@@ -312,3 +317,66 @@ async def get_accessible_document_sets(
             exc_info=True,
         )
         raise RuntimeError(f"Failed to fetch accessible document sets: {exc}") from exc
+
+
+async def resolve_user_from_access_token(
+    access_token: AccessToken,
+    db_session: Session,
+) -> User:
+    """Resolve the authenticated Onyx user for an MCP access token.
+
+    MCP auth only verifies that the bearer token is accepted by `/me`. The search
+    pipeline, however, needs the actual ORM `User` so that ACL filters can be
+    constructed correctly.
+    """
+    user: User | None = None
+
+    claims = access_token.claims or {}
+    user_id = claims.get("id")
+    if isinstance(user_id, str):
+        try:
+            parsed_user_id = UUID(user_id)
+            user = db_session.scalar(
+                select(User).where(User.id == parsed_user_id)
+            )
+        except ValueError:
+            logger.warning(
+                "Onyx MCP Server: Invalid token claim user id '%s' when resolving MCP user",
+                user_id,
+            )
+
+    if user is None:
+        email = claims.get("email")
+        if isinstance(email, str) and email:
+            user = get_user_by_email(email, db_session)
+
+    if user is None:
+        response = await get_http_client().get(
+            f"{build_api_server_url_for_http_requests(respect_env_override_if_set=True)}/me",
+            headers={"Authorization": f"Bearer {access_token.token}"},
+        )
+        response.raise_for_status()
+
+        payload = response.json()
+        user_id = payload.get("id")
+        if isinstance(user_id, str):
+            try:
+                parsed_user_id = UUID(user_id)
+                user = db_session.scalar(
+                    select(User).where(User.id == parsed_user_id)
+                )
+            except ValueError:
+                logger.warning(
+                    "Onyx MCP Server: Invalid /me user id '%s' when resolving MCP user",
+                    user_id,
+                )
+
+        if user is None:
+            email = payload.get("email")
+            if isinstance(email, str) and email:
+                user = get_user_by_email(email, db_session)
+
+    if user is None:
+        raise RuntimeError("Failed to resolve authenticated user for MCP request")
+
+    return user

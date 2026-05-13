@@ -2,21 +2,37 @@
 
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
 from onyx.configs.constants import DocumentSource
 from onyx.mcp_server.api import mcp_server
 from onyx.mcp_server.output_policy import apply_mcp_output_policy
+from onyx.mcp_server.search_backend_ce import search_indexed_sections_without_llm
 from onyx.mcp_server.utils import get_http_client
 from onyx.mcp_server.utils import get_indexed_sources
 from onyx.mcp_server.utils import redact_sensitive_text
+from onyx.mcp_server.utils import resolve_user_from_access_token
 from onyx.mcp_server.utils import require_access_token
 from onyx.utils.logger import setup_logger
 from onyx.utils.variable_functionality import build_api_server_url_for_http_requests
 from onyx.utils.variable_functionality import global_version
 
 logger = setup_logger()
+
+
+def _find_invalid_urls(urls: list[str]) -> list[str]:
+    """Return URLs that are not valid http/https URLs."""
+    invalid = []
+    for url in urls:
+        try:
+            parsed = urlparse(url)
+            if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                invalid.append(url)
+        except Exception:
+            invalid.append(url)
+    return invalid
 
 
 def _extract_error_detail(response: httpx.Response) -> str:
@@ -38,6 +54,7 @@ def _extract_error_detail(response: httpx.Response) -> str:
 async def search_indexed_documents(
     query: str,
     source_types: list[str] | None = None,
+    document_set_names: list[str] | None = None,
     time_cutoff: str | None = None,
     limit: int = 10,
 ) -> dict[str, Any]:
@@ -55,6 +72,7 @@ async def search_indexed_documents(
     In EE mode, the dedicated search endpoint is used instead.
 
     To find a list of available sources, use the `indexed_sources` resource.
+    To find available document set names, use the `document_sets` resource.
     Returns chunks of text as search results with snippets, scores, and metadata.
 
     Example usage:
@@ -62,6 +80,7 @@ async def search_indexed_documents(
     {
         "query": "What is the latest status of PROJ-1234 and what is the next development item?",
         "source_types": ["jira", "google_drive", "github"],
+        "document_set_names": ["Engineering Docs", "Product Specs"],
         "time_cutoff": "2025-11-24T00:00:00Z",
         "limit": 10,
     }
@@ -127,24 +146,41 @@ async def search_indexed_documents(
             },
         )
 
-    # Convert source_types strings to DocumentSource enums if provided
-    # Invalid values will be handled by the API server
+    # Convert source_types strings to DocumentSource enums if provided.
+    # Any unrecognised value is rejected immediately so the caller knows the
+    # filter was NOT applied (silent ignore causes phantom-filter bugs).
     if source_types is not None:
         source_type_enums = []
+        invalid_types: list[str] = []
         for src in source_types:
             try:
                 source_type_enums.append(DocumentSource(src.lower()))
             except ValueError:
-                logger.warning(
-                    f"Onyx MCP Server: Invalid source type '{src}' - will be ignored by server"
-                )
+                invalid_types.append(src)
+
+        if invalid_types:
+            valid_values = sorted(s.value for s in DocumentSource)
+            return apply_mcp_output_policy(
+                "search_indexed_documents",
+                {
+                    "documents": [],
+                    "total_results": 0,
+                    "query": query,
+                    "error": (
+                        f"Invalid source_type(s): {invalid_types}. "
+                        f"Valid values are: {valid_values}"
+                    ),
+                },
+            )
 
     # Build filters dict only with non-None values
     filters: dict[str, Any] | None = None
-    if source_type_enums or time_cutoff_dt:
+    if source_type_enums or document_set_names or time_cutoff_dt:
         filters = {}
         if source_type_enums:
             filters["source_type"] = [src.value for src in source_type_enums]
+        if document_set_names:
+            filters["document_set"] = document_set_names
         if time_cutoff_dt:
             filters["time_cutoff"] = time_cutoff_dt.isoformat()
 
@@ -340,6 +376,19 @@ async def open_urls(
     """
     logger.info(f"Onyx MCP Server: Open URL: fetching {len(urls)} URLs")
 
+    invalid_urls = _find_invalid_urls(urls)
+    if invalid_urls:
+        return apply_mcp_output_policy(
+            "open_urls",
+            {
+                "error": (
+                    f"Invalid URL(s): {invalid_urls}. "
+                    "All URLs must start with http:// or https:// and include a valid host."
+                ),
+                "results": [],
+            },
+        )
+
     access_token = require_access_token()
 
     try:
@@ -372,5 +421,79 @@ async def open_urls(
             {
                 "error": f"URL fetch failed: {str(e)}",
                 "results": [],
+            },
+        )
+
+
+@mcp_server.tool()
+async def search_indexed_documents_without_llm(
+    query: str,
+    source_types: list[str] | None = None,
+    time_cutoff: str | None = None,
+    limit: int = 10,
+) -> dict[str, Any]:
+    """
+    Search the user's knowledge base using direct CE retrieval without any LLM invocation.
+    This tool returns raw section-level search results for advanced use cases where
+    you need access to unprocessed retrieval output without chat-based processing.
+
+    Use this when you need direct access to indexed documents without the latency
+    or cost of LLM-based document selection or ranking.
+
+    Returns section-based raw retrieval payloads with full metadata.
+
+    To find a list of available sources, use the `indexed_sources` resource.
+    To find available document sets, use the `document_sets` resource.
+
+    Example usage:
+    ```
+    {
+        "query": "technical specification for feature X",
+        "source_types": ["confluence", "github"],
+        "limit": 10,
+    }
+    ```
+    """
+    from onyx.db.engine.sql_engine import get_session_with_current_tenant
+
+    redacted_query = redact_sensitive_text(query)
+    logger.info(
+        "Onyx MCP Server: search without llm: query=%s, limit=%s",
+        redacted_query,
+        limit,
+    )
+
+    access_token = require_access_token()
+
+    try:
+        with get_session_with_current_tenant() as db_session:
+            user = await resolve_user_from_access_token(access_token, db_session)
+            result = await search_indexed_sections_without_llm(
+                query=redacted_query,
+                access_token=access_token,
+                source_types=source_types,
+                time_cutoff=time_cutoff,
+                limit=limit,
+                db_session=db_session,
+                user=user,
+            )
+            return apply_mcp_output_policy(
+                "search_indexed_documents_without_llm",
+                result,
+            )
+    except Exception as e:
+        logger.error(
+            "Onyx MCP Server: search without llm failed: %s", e, exc_info=True
+        )
+        return apply_mcp_output_policy(
+            "search_indexed_documents_without_llm",
+            {
+                "query": redacted_query,
+                "total_results": 0,
+                "sections": [],
+                "backend": "ce_direct_search",
+                "retrieval_mode": "hybrid",
+                "filters_applied": {},
+                "error": f"Document search failed: {str(e)}",
             },
         )

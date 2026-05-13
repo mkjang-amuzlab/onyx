@@ -34,13 +34,14 @@ mcp_server = FastMCP(
 # Components register themselves via decorators on the shared mcp_server instance
 from onyx.mcp_server.tools import search  # noqa: E402, F401
 from onyx.mcp_server.resources import indexed_sources  # noqa: E402, F401
+from onyx.mcp_server.resources import document_sets  # noqa: E402, F401
 
 logger.info("MCP server instance created")
 
 
 def create_mcp_fastapi_app() -> FastAPI:
     """Create FastAPI app wrapping MCP server with auth and shared client lifecycle."""
-    mcp_asgi_app = mcp_server.http_app(path="/")
+    mcp_asgi_app = mcp_server.http_app(path="/", stateless_http=True)
 
     async def _ensure_streamable_accept_header(
         scope: Scope, receive: Receive, send: Send
