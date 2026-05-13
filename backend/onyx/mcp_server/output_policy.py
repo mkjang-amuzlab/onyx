@@ -43,6 +43,23 @@ def _summary_text(value: Any) -> Any:
     return build_safe_summary(value)
 
 
+def _redact_structure(value: Any, *, preserve_keys: set[str] | None = None) -> Any:
+    if isinstance(value, str):
+        return redact_sensitive_output_text(value)
+    if isinstance(value, list):
+        return [_redact_structure(item, preserve_keys=preserve_keys) for item in value]
+    if isinstance(value, dict):
+        preserved = preserve_keys or set()
+        redacted: dict[str, Any] = {}
+        for key, item in value.items():
+            if key in preserved:
+                redacted[key] = item
+            else:
+                redacted[key] = _redact_structure(item, preserve_keys=preserve_keys)
+        return redacted
+    return value
+
+
 def _apply_result_item_masking(item: dict[str, Any]) -> dict[str, Any]:
     masked_item = deepcopy(item)
     for key, value in list(masked_item.items()):
@@ -180,11 +197,38 @@ def _apply_search_web_policy(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _apply_search_without_llm_policy(payload: dict[str, Any]) -> dict[str, Any]:
+    if MCP_SERVER_OUTPUT_POLICY_MODE == "raw" and MCP_SERVER_ALLOW_RAW_OUTPUT:
+        return _attach_policy(
+            payload,
+            MCPOutputPolicyDecision(
+                mode="raw",
+                redaction_applied=False,
+                summary_applied=False,
+            ),
+        )
+
+    processed = deepcopy(payload)
+    sections = list(processed.get("sections") or [])
+    processed_sections: list[dict[str, Any]] = []
+    redaction_applied = False
+
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        processed_section = _redact_structure(
+            section,
+            preserve_keys={"link", "url"},
+        )
+        if processed_section != section:
+            redaction_applied = True
+        processed_sections.append(processed_section)
+
+    processed["sections"] = processed_sections
     return _attach_policy(
-        payload,
+        processed,
         MCPOutputPolicyDecision(
-            mode="raw",
-            redaction_applied=False,
+            mode="redacted",
+            redaction_applied=redaction_applied,
             summary_applied=False,
         ),
     )
