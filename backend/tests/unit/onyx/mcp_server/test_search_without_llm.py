@@ -88,6 +88,10 @@ def test_normalize_source_types_skips_invalid_values() -> None:
     assert normalized == ["slack", "github"]
 
 
+def test_normalize_source_types_returns_none_when_all_values_invalid() -> None:
+    assert _normalize_source_types(["bad1", "bad2"]) is None
+
+
 @patch(
     "onyx.mcp_server.search_backend_ce.get_indexed_sources",
     new_callable=AsyncMock,
@@ -133,6 +137,46 @@ def test_output_policy_attaches_raw_policy_for_new_tool() -> None:
         "redaction_applied": False,
         "summary_applied": False,
     }
+
+
+def test_output_policy_redacts_without_raw_override(monkeypatch) -> None:
+    from onyx.mcp_server import output_policy as policy
+
+    monkeypatch.setattr(policy, "MCP_SERVER_OUTPUT_POLICY_MODE", "raw")
+    monkeypatch.setattr(policy, "MCP_SERVER_ALLOW_RAW_OUTPUT", False)
+
+    shaped = policy.apply_mcp_output_policy(
+        "search_indexed_documents_without_llm",
+        {
+            "query": "alice@example.com",
+            "total_results": 1,
+            "sections": [
+                {
+                    "document_id": "doc-1",
+                    "content": "Contact alice@example.com or call 010-1234-5678.",
+                    "blurb": "alice@example.com",
+                    "match_highlights": ["alice@example.com"],
+                    "link": "https://example.com/doc",
+                }
+            ],
+            "backend": "ce_direct_search",
+            "retrieval_mode": "hybrid",
+            "filters_applied": {},
+        },
+    )
+
+    assert shaped["policy"] == {
+        "mode": "redacted",
+        "redaction_applied": True,
+        "summary_applied": False,
+    }
+    assert shaped["query"] == "[REDACTED_EMAIL]"
+    assert shaped["sections"][0]["content"] == (
+        "Contact [REDACTED_EMAIL] or call [REDACTED_PHONE]."
+    )
+    assert shaped["sections"][0]["blurb"] == "[REDACTED_EMAIL]"
+    assert shaped["sections"][0]["match_highlights"] == ["[REDACTED_EMAIL]"]
+    assert shaped["sections"][0]["link"] == "https://example.com/doc"
 
 
 @patch("onyx.mcp_server.auth.get_http_client")
@@ -184,7 +228,7 @@ def test_resolve_user_from_access_token_uses_claims_first(
 
 
 @patch("onyx.mcp_server.utils.get_http_client")
-def test_resolve_user_from_access_token_prefers_user_id(
+def test_resolve_user_from_access_token_falls_back_to_me_api(
     mock_get_http_client: Mock,
 ) -> None:
     response = Mock()
