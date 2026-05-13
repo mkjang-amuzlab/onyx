@@ -179,12 +179,25 @@ def _apply_search_web_policy(payload: dict[str, Any]) -> dict[str, Any]:
     return _attach_policy(processed, decision)
 
 
+def _apply_search_without_llm_policy(payload: dict[str, Any]) -> dict[str, Any]:
+    return _attach_policy(
+        payload,
+        MCPOutputPolicyDecision(
+            mode="raw",
+            redaction_applied=False,
+            summary_applied=False,
+        ),
+    )
+
+
 def apply_mcp_output_policy(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Apply tool-specific output shaping before returning MCP payloads."""
     cloned = deepcopy(payload)
 
     if tool_name == "search_indexed_documents":
         return _apply_search_documents_policy(cloned)
+    if tool_name == "search_indexed_documents_without_llm":
+        return _apply_search_without_llm_policy(cloned)
     if tool_name == "search_web":
         return _apply_search_web_policy(cloned)
     if tool_name == "open_urls":

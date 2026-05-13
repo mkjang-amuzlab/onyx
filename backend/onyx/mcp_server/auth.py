@@ -37,11 +37,22 @@ class OnyxTokenVerifier(TokenVerifier):
             )
             return None
 
+        claims = {}
+        try:
+            payload = response.json()
+            if isinstance(payload, dict):
+                if payload.get("id") is not None:
+                    claims["id"] = str(payload["id"])
+                if payload.get("email") is not None:
+                    claims["email"] = str(payload["email"])
+        except Exception:
+            logger.debug("MCP auth /me response did not contain JSON claims", exc_info=True)
+
         return AccessToken(
             token=token,
             client_id="mcp",
             scopes=["mcp:use"],
             expires_at=None,
             resource=None,
-            claims={},
+            claims=claims,
         )

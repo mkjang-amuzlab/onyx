@@ -1,8 +1,8 @@
-"""Resource exposing document sets available to the current user."""
+"""Resources that expose document set metadata for the Onyx MCP server."""
 
 from __future__ import annotations
 
-import json
+from typing import Any
 
 from onyx.mcp_server.api import mcp_server
 from onyx.mcp_server.utils import get_accessible_document_sets
@@ -16,26 +16,30 @@ logger = setup_logger()
     "resource://document_sets",
     name="document_sets",
     description=(
-        "Enumerate the Document Sets accessible to the current user. Use the "
-        "returned `name` values with the `document_set_names` filter of the "
-        "`search_indexed_documents` tool to scope searches to a specific set."
+        "Lists the document sets available to the current user in Onyx. "
+        "Document sets group documents by project, team, or topic. "
+        "Pass one or more set names as `document_set_names` in "
+        "`search_indexed_documents` to scope a search to specific groups."
     ),
     mime_type="application/json",
 )
-async def document_sets_resource() -> str:
-    """Return the list of document sets the user can filter searches by."""
-
+async def document_sets_resource() -> dict[str, Any]:
+    """Return the list of accessible document set names."""
     access_token = require_access_token()
 
-    document_sets = sorted(
-        await get_accessible_document_sets(access_token), key=lambda entry: entry.name
-    )
+    try:
+        document_sets = await get_accessible_document_sets(access_token)
+    except Exception as e:
+        logger.error(
+            "Onyx MCP Server: Failed to fetch document sets: %s", e, exc_info=True
+        )
+        return {
+            "document_sets": [],
+            "error": f"Failed to fetch document sets: {str(e)}",
+        }
 
+    names = sorted(ds.name for ds in document_sets if ds.name)
     logger.info(
-        "Onyx MCP Server: document_sets resource returning %s entries",
-        len(document_sets),
+        "Onyx MCP Server: document_sets resource returning %s entries", len(names)
     )
-
-    # FastMCP 3.2+ requires str/bytes/list[ResourceContent] — it no longer
-    # auto-serializes; serialize to JSON ourselves.
-    return json.dumps([entry.model_dump(mode="json") for entry in document_sets])
+    return {"document_sets": names}
