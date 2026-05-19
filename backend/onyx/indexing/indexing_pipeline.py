@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from onyx.configs.app_configs import DEFAULT_CONTEXTUAL_RAG_LLM_NAME
 from onyx.configs.app_configs import DEFAULT_CONTEXTUAL_RAG_LLM_PROVIDER
 from onyx.configs.app_configs import ENABLE_CONTEXTUAL_RAG
+from onyx.configs.app_configs import FILE_CONNECTOR_CONTEXTUAL_ENRICHMENT
 from onyx.configs.app_configs import MAX_CHUNKS_PER_DOC_BATCH
 from onyx.configs.app_configs import MAX_DOCUMENT_CHARS
 from onyx.configs.app_configs import MAX_TOKENS_FOR_FULL_INCLUSION
@@ -25,6 +26,7 @@ from onyx.connectors.cross_connector_utils.miscellaneous_utils import (
 from onyx.connectors.models import ConnectorFailure
 from onyx.connectors.models import ConnectorStopSignal
 from onyx.connectors.models import Document
+from onyx.connectors.models import DocumentSource
 from onyx.connectors.models import DocumentFailure
 from onyx.connectors.models import ImageSection
 from onyx.connectors.models import IndexAttemptMetadata
@@ -60,6 +62,7 @@ from onyx.indexing.chunk_batch_store import ChunkBatchStore
 from onyx.indexing.chunker import Chunker
 from onyx.indexing.embedder import embed_chunks_with_failure_handling
 from onyx.indexing.embedder import IndexingEmbedder
+from onyx.indexing.file_contextual_enrichment import enrich_file_chunks_with_context
 from onyx.indexing.models import DocAwareChunk
 from onyx.indexing.models import DocMetadataAwareIndexChunk
 from onyx.indexing.models import IndexingBatchAdapter
@@ -768,7 +771,29 @@ def add_contextual_summaries(
     trunc_doc_chunk_tokens = (
         llm.config.max_input_tokens - prompt_tokens - chunk_token_limit
     )
-    for chunks_by_doc in doc2chunks.values():
+    file_chunks: list[DocAwareChunk] = []
+    non_file_chunks_by_doc: dict[str, list[DocAwareChunk]] = {}
+
+    if FILE_CONNECTOR_CONTEXTUAL_ENRICHMENT:
+        for doc_id, chunks_by_doc in doc2chunks.items():
+            if chunks_by_doc and chunks_by_doc[0].source_document.source == DocumentSource.FILE:
+                file_chunks.extend(chunks_by_doc)
+            else:
+                non_file_chunks_by_doc[doc_id] = chunks_by_doc
+    else:
+        non_file_chunks_by_doc = dict(doc2chunks)
+
+    if file_chunks:
+        enrich_file_chunks_with_context(
+            chunks=file_chunks,
+            llm=llm,
+            tokenizer=tokenizer,
+            chunk_token_limit=chunk_token_limit,
+            trunc_doc_summary_tokens=trunc_doc_summary_tokens,
+            trunc_doc_chunk_tokens=trunc_doc_chunk_tokens,
+        )
+
+    for chunks_by_doc in non_file_chunks_by_doc.values():
         doc_tokens = None
         if USE_DOCUMENT_SUMMARY:
             doc_tokens = add_document_summaries(

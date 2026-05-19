@@ -2,6 +2,7 @@ from chonkie import SentenceChunker
 
 from onyx.configs.app_configs import AVERAGE_SUMMARY_EMBEDDINGS
 from onyx.configs.app_configs import BLURB_SIZE
+from onyx.configs.app_configs import FILE_CONNECTOR_STRUCTURE_AWARE_CHUNKING
 from onyx.configs.app_configs import LARGE_CHUNK_RATIO
 from onyx.configs.app_configs import MINI_CHUNK_SIZE
 from onyx.configs.app_configs import SKIP_METADATA_IN_CHUNK
@@ -16,6 +17,7 @@ from onyx.connectors.cross_connector_utils.miscellaneous_utils import (
 from onyx.connectors.models import IndexingDocument
 from onyx.indexing.chunking import DocumentChunker
 from onyx.indexing.chunking import extract_blurb
+from onyx.indexing.chunking.file_section_chunker import build_file_document_chunker
 from onyx.indexing.indexing_heartbeat import IndexingHeartbeatInterface
 from onyx.indexing.models import DocAwareChunk
 from onyx.llm.utils import MAX_CONTEXT_TOKENS
@@ -185,6 +187,12 @@ class Chunker:
             chunk_splitter=self.chunk_splitter,
             mini_chunk_splitter=self.mini_chunk_splitter,
         )
+        self._file_document_chunker = build_file_document_chunker(
+            tokenizer=tokenizer,
+            blurb_splitter=self.blurb_splitter,
+            chunk_splitter=self.chunk_splitter,
+            mini_chunk_splitter=self.mini_chunk_splitter,
+        )
 
     def _handle_single_document(
         self, document: IndexingDocument
@@ -265,7 +273,14 @@ class Chunker:
         # Use processed_sections if available (IndexingDocument), otherwise use original sections
         sections_to_chunk = document.processed_sections
 
-        normal_chunks = self._document_chunker.chunk(
+        document_chunker = self._document_chunker
+        if (
+            document.source == DocumentSource.FILE
+            and FILE_CONNECTOR_STRUCTURE_AWARE_CHUNKING
+        ):
+            document_chunker = self._file_document_chunker
+
+        normal_chunks = document_chunker.chunk(
             document,
             sections_to_chunk,
             title_prefix,

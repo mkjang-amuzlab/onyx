@@ -3,11 +3,11 @@ from unittest.mock import Mock
 
 import pytest
 
-from onyx.configs.app_configs import USE_CHUNK_SUMMARY
-from onyx.configs.app_configs import USE_DOCUMENT_SUMMARY
 from onyx.configs.constants import DocumentSource
 from onyx.connectors.models import Document
 from onyx.connectors.models import TextSection
+from onyx.configs.app_configs import USE_CHUNK_SUMMARY
+from onyx.configs.app_configs import USE_DOCUMENT_SUMMARY
 from onyx.indexing.chunker import Chunker
 from onyx.indexing.embedder import DefaultIndexingEmbedder
 from onyx.indexing.indexing_pipeline import process_image_sections
@@ -107,3 +107,52 @@ def test_chunker_heartbeat(
 
     assert mock_heartbeat.call_count == 1
     assert len(chunks) > 0
+
+
+def test_chunker_uses_file_specific_document_chunker_only_for_file_documents(
+    embedder: DefaultIndexingEmbedder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import onyx.indexing.chunker as chunker_module
+
+    file_document = Document(
+        id="file_doc",
+        source=DocumentSource.FILE,
+        semantic_identifier="File Document",
+        metadata={},
+        doc_updated_at=None,
+        sections=[TextSection(text="광고검출 시스템 개요", link="file-link")],
+    )
+    indexing_documents = process_image_sections([file_document])
+
+    file_helper_called = False
+
+    class StubDocumentChunker:
+        def chunk(self, *args: object, **kwargs: object):  # noqa: ANN002, ANN003
+            nonlocal file_helper_called
+            file_helper_called = True
+            return []
+
+    def build_stub_document_chunker(**kwargs: object) -> StubDocumentChunker:  # noqa: ARG001
+        return StubDocumentChunker()
+
+    monkeypatch.setattr(
+        chunker_module,
+        "FILE_CONNECTOR_STRUCTURE_AWARE_CHUNKING",
+        True,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        chunker_module,
+        "build_file_document_chunker",
+        build_stub_document_chunker,
+        raising=False,
+    )
+
+    chunker = Chunker(
+        tokenizer=embedder.embedding_model.tokenizer,
+        enable_multipass=False,
+        enable_contextual_rag=False,
+    )
+    chunker.chunk(indexing_documents)
+
+    assert file_helper_called is True

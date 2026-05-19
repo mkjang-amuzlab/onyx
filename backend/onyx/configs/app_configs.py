@@ -1123,6 +1123,16 @@ MCP_SERVER_SUMMARY_MAX_CHARS = int(
     os.environ.get("MCP_SERVER_SUMMARY_MAX_CHARS") or 800
 )
 
+FILE_CONNECTOR_STRUCTURE_AWARE_CHUNKING = (
+    os.environ.get("FILE_CONNECTOR_STRUCTURE_AWARE_CHUNKING", "false").lower()
+    == "true"
+)
+
+FILE_CONNECTOR_CONTEXTUAL_ENRICHMENT = (
+    os.environ.get("FILE_CONNECTOR_CONTEXTUAL_ENRICHMENT", "false").lower()
+    == "true"
+)
+
 # Safety valve for explicit raw-output mode during debugging.
 MCP_SERVER_ALLOW_RAW_OUTPUT = (
     os.environ.get("MCP_SERVER_ALLOW_RAW_OUTPUT", "false").lower() == "true"

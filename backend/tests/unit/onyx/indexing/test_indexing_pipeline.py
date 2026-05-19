@@ -231,6 +231,71 @@ def test_contextual_rag(
         assert chunk.chunk_context == chunk_context
 
 
+def test_add_contextual_summaries_uses_file_helper_only_for_file_chunks(
+    embedder: DefaultIndexingEmbedder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import onyx.indexing.indexing_pipeline as indexing_pipeline_module
+
+    file_document = Document(
+        id="file_doc",
+        source=DocumentSource.FILE,
+        semantic_identifier="File Document",
+        metadata={},
+        doc_updated_at=None,
+        sections=[TextSection(text="광고검출 시스템 개요", link="file-link")],
+    )
+    web_document = Document(
+        id="web_doc",
+        source=DocumentSource.WEB,
+        semantic_identifier="Web Document",
+        metadata={},
+        doc_updated_at=None,
+        sections=[TextSection(text="web overview", link="web-link")],
+    )
+
+    indexing_documents = process_image_sections([file_document, web_document])
+
+    chunker = Chunker(
+        tokenizer=embedder.embedding_model.tokenizer,
+        enable_multipass=False,
+        enable_contextual_rag=True,
+    )
+    chunks = chunker.chunk(indexing_documents)
+
+    file_helper_called = False
+
+    def fake_file_helper(**kwargs: Any):
+        nonlocal file_helper_called
+        file_helper_called = True
+        return kwargs["chunks"]
+
+    mock_llm = Mock()
+    mock_llm.config.max_input_tokens = 4096
+    mock_llm.invoke = Mock()
+
+    monkeypatch.setattr(
+        indexing_pipeline_module,
+        "FILE_CONNECTOR_CONTEXTUAL_ENRICHMENT",
+        True,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        indexing_pipeline_module,
+        "enrich_file_chunks_with_context",
+        fake_file_helper,
+        raising=False,
+    )
+
+    indexing_pipeline_module.add_contextual_summaries(
+        chunks=chunks,
+        llm=mock_llm,
+        tokenizer=embedder.embedding_model.tokenizer,
+        chunk_token_limit=chunker.chunk_token_limit * 2,
+    )
+
+    assert file_helper_called is True
+
+
 # ---------------------------------------------------------------------------
 # _apply_document_ingestion_hook
 # ---------------------------------------------------------------------------
