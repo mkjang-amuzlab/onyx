@@ -196,6 +196,28 @@ OAUTH_ENABLED = bool(OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET)
 # OpenID Connect configuration URL for OIDC integrations
 OPENID_CONFIG_URL = os.environ.get("OPENID_CONFIG_URL") or ""
 
+# Keeps the reCAPTCHA cookie and token validity window aligned.
+CAPTCHA_COOKIE_TTL_SECONDS = int(os.environ.get("CAPTCHA_COOKIE_TTL_SECONDS", "120"))
+
+# Minimum required scopes for Google OAuth / OIDC login.
+GOOGLE_LOGIN_BASE_SCOPES = ["openid", "email", "profile"]
+
+# Applicable for Google OAuth login, allows you to override the scopes that
+# access token needs to be passed through to tool calls that require
+# additional Google API scopes.
+GOOGLE_OAUTH_SCOPE_OVERRIDE: list[str] | None = None
+_GOOGLE_OAUTH_SCOPE_OVERRIDE = os.environ.get("GOOGLE_OAUTH_SCOPE_OVERRIDE")
+
+if _GOOGLE_OAUTH_SCOPE_OVERRIDE:
+    try:
+        GOOGLE_OAUTH_SCOPE_OVERRIDE = [
+            scope.strip() for scope in _GOOGLE_OAUTH_SCOPE_OVERRIDE.split(",")
+        ]
+    except Exception:
+        logger.exception(
+            f"Error configuring Google OAuth login scopes: {_GOOGLE_OAUTH_SCOPE_OVERRIDE}"
+        )
+
 # Applicable for OIDC Auth, allows you to override the scopes that
 # are requested from the OIDC provider. Currently used when passing
 # over access tokens to tool calls and the tool needs more scopes
@@ -1032,6 +1054,12 @@ MANAGED_VESPA = os.environ.get("MANAGED_VESPA", "").lower() == "true"
 
 ENABLE_EMAIL_INVITES = os.environ.get("ENABLE_EMAIL_INVITES", "").lower() == "true"
 
+# When true, GET /users is restricted to callers with READ_USERS so non-admins
+# cannot enumerate the tenant directory. Off by default to preserve sharing UX.
+USER_DIRECTORY_ADMIN_ONLY = (
+    os.environ.get("USER_DIRECTORY_ADMIN_ONLY", "").lower() == "true"
+)
+
 # Limit on number of users a free trial tenant can invite (cloud only)
 NUM_FREE_TRIAL_USER_INVITES = int(os.environ.get("NUM_FREE_TRIAL_USER_INVITES", "10"))
 
@@ -1118,6 +1146,12 @@ MCP_SERVER_OPEN_URL_MODE = (
     os.environ.get("MCP_SERVER_OPEN_URL_MODE", "summary_only").lower()
 )
 
+# Allow falling back to Playwright for URL fetches when the primary crawler
+# cannot handle a page.
+OPEN_URL_PLAYWRIGHT_FALLBACK_ENABLED = (
+    os.environ.get("OPEN_URL_PLAYWRIGHT_FALLBACK_ENABLED", "true").lower() == "true"
+)
+
 # Maximum characters for generated summaries returned by MCP.
 MCP_SERVER_SUMMARY_MAX_CHARS = int(
     os.environ.get("MCP_SERVER_SUMMARY_MAX_CHARS") or 800
@@ -1138,6 +1172,56 @@ MCP_SERVER_ALLOW_RAW_OUTPUT = (
     os.environ.get("MCP_SERVER_ALLOW_RAW_OUTPUT", "false").lower() == "true"
 )
 
+# Cache query embeddings in the configured cache backend so identical queries
+# don't re-hit the embedding provider.
+QUERY_EMBEDDING_CACHE_ENABLED = (
+    os.environ.get("QUERY_EMBEDDING_CACHE_ENABLED", "true").lower() == "true"
+)
+QUERY_EMBEDDING_CACHE_TTL_S = int(
+    os.environ.get("QUERY_EMBEDDING_CACHE_TTL_S", "900")
+)
+assert QUERY_EMBEDDING_CACHE_TTL_S > 0, "QUERY_EMBEDDING_CACHE_TTL_S must be positive."
+
+# Allow disabling the OpenSearch migration beat task when needed.
+DISABLE_OPENSEARCH_MIGRATION_TASK = (
+    os.environ.get("DISABLE_OPENSEARCH_MIGRATION_TASK", "").lower() == "true"
+)
+
+# Allow the instance to run without Vespa while keeping OpenSearch retrieval
+# paths active.
+ONYX_DISABLE_VESPA = os.environ.get("ONYX_DISABLE_VESPA", "").lower() == "true"
+
+# Allow disabling the legacy indexed search MCP tool while keeping the rest of
+# the MCP server available.
+MCP_SERVER_ENABLE_INDEXED_SEARCH_TOOL = (
+    os.environ.get("MCP_SERVER_ENABLE_INDEXED_SEARCH_TOOL", "true").lower()
+    == "true"
+)
+
+# Default limit used by the without_llm MCP tool when the caller omits `limit`.
+MCP_SERVER_SEARCH_WITHOUT_LLM_DEFAULT_LIMIT = int(
+    os.environ.get("MCP_SERVER_SEARCH_WITHOUT_LLM_DEFAULT_LIMIT", "10")
+)
+
+# Cap the number of embedded images processed per file and per upload batch.
+MAX_EMBEDDED_IMAGES_PER_FILE = max(
+    0, int(os.environ.get("MAX_EMBEDDED_IMAGES_PER_FILE") or 500)
+)
+MAX_EMBEDDED_IMAGES_PER_UPLOAD = max(
+    0, int(os.environ.get("MAX_EMBEDDED_IMAGES_PER_UPLOAD") or 1000)
+)
+MAX_XLSX_CELLS_PER_SHEET = max(
+    0, int(os.environ.get("MAX_XLSX_CELLS_PER_SHEET") or 10_000_000)
+)
+
+# Opt-in per-IP rate limit on /auth/register.
+SIGNUP_RATE_LIMIT_ENABLED = (
+    os.environ.get("SIGNUP_RATE_LIMIT_ENABLED", "").lower() == "true"
+)
+
+# Allow disabling TLS when connecting to OpenSearch.
+OPENSEARCH_USE_SSL = os.environ.get("OPENSEARCH_USE_SSL", "true").lower() == "true"
+
 
 POD_NAME = os.environ.get("POD_NAME")
 POD_NAMESPACE = os.environ.get("POD_NAMESPACE")
@@ -1156,6 +1240,17 @@ CAPTCHA_ENABLED = os.environ.get("CAPTCHA_ENABLED", "").lower() == "true"
 
 # Google reCAPTCHA secret key (server-side validation)
 RECAPTCHA_SECRET_KEY = os.environ.get("RECAPTCHA_SECRET_KEY", "")
+# Secret used by the X-Healthcheck-Token bypass header for login captcha.
+HEALTH_CHECK_BYPASS_TOKEN = os.environ.get("HEALTH_CHECK_BYPASS_TOKEN", "")
+# Enterprise reCAPTCHA settings used by the captcha middleware.
+RECAPTCHA_ENTERPRISE_PROJECT_ID = os.environ.get("RECAPTCHA_ENTERPRISE_PROJECT_ID", "")
+RECAPTCHA_ENTERPRISE_API_KEY = os.environ.get("RECAPTCHA_ENTERPRISE_API_KEY", "")
+RECAPTCHA_SITE_KEY = os.environ.get("RECAPTCHA_SITE_KEY", "")
+RECAPTCHA_HOSTNAME_ALLOWLIST = frozenset(
+    h.strip()
+    for h in os.environ.get("RECAPTCHA_HOSTNAME_ALLOWLIST", "").split(",")
+    if h.strip()
+)
 
 # Minimum score threshold for reCAPTCHA v3 (0.0-1.0, higher = more likely human)
 # 0.5 is the recommended default
@@ -1255,6 +1350,9 @@ COHERE_DEFAULT_API_KEY = os.environ.get("COHERE_DEFAULT_API_KEY")
 VERTEXAI_DEFAULT_CREDENTIALS = os.environ.get("VERTEXAI_DEFAULT_CREDENTIALS")
 VERTEXAI_DEFAULT_LOCATION = os.environ.get("VERTEXAI_DEFAULT_LOCATION", "global")
 OPENROUTER_DEFAULT_API_KEY = os.environ.get("OPENROUTER_DEFAULT_API_KEY")
+AUTO_PROVISION_DEFAULT_LLM_PROVIDERS = (
+    os.environ.get("AUTO_PROVISION_DEFAULT_LLM_PROVIDERS", "true").lower() == "true"
+)
 
 INSTANCE_TYPE = (
     "managed"
