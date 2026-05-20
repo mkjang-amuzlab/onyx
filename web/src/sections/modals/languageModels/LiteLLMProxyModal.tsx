@@ -117,6 +117,10 @@ export default function LiteLLMProxyModal({
       LLMProviderName.LITELLM_PROXY,
       existingLlmProvider
     ),
+    // LiteLLM Proxy does not expose the auto-update toggle in this modal.
+    // Force manual mode so legacy providers saved with is_auto_mode=true
+    // still allow model visibility checkboxes to be toggled.
+    is_auto_mode: false,
     api_base: existingLlmProvider?.api_base ?? DEFAULT_API_BASE,
   } as LiteLLMProxyModalValues;
 
